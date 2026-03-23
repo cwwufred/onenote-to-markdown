@@ -2,6 +2,7 @@
 
 import customtkinter as ctk
 import os
+import sys
 import subprocess
 import threading
 from pathlib import Path
@@ -9,6 +10,11 @@ from tkinter import filedialog
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
+
+def log(msg):
+    """Print to console for debugging."""
+    print(f"[LOG] {msg}")
+    sys.stdout.flush()
 
 
 class OneNote2MDApp(ctk.CTk):
@@ -20,6 +26,7 @@ class OneNote2MDApp(ctk.CTk):
         self.selected_files = []
         self.is_exporting = False
         self.setup_ui()
+        log("App initialized")
 
     def load_config(self):
         import json
@@ -84,6 +91,7 @@ class OneNote2MDApp(ctk.CTk):
             self.source_entry.delete(0, "end")
             self.source_entry.insert(0, f"{len(files)} files")
             self.refresh_list()
+            log(f"Selected {len(files)} files")
 
     def browse_out(self):
         folder = filedialog.askdirectory(title="Output Folder")
@@ -92,6 +100,7 @@ class OneNote2MDApp(ctk.CTk):
             self.output_entry.insert(0, folder)
             self.cfg["output_dir"] = folder
             self.save_config(self.cfg)
+            log(f"Output folder: {folder}")
 
     def refresh_list(self):
         self.files_list.delete("1.0", "end")
@@ -100,74 +109,104 @@ class OneNote2MDApp(ctk.CTk):
 
     def start_export(self):
         if self.is_exporting or not self.selected_files:
+            log("Export skipped: already exporting or no files")
             return
         self.is_exporting = True
         self.export_btn.configure(state="disabled", text="Converting...")
+        log("Starting export...")
         threading.Thread(target=self.run_export).start()
 
     def run_export(self):
         output = self.output_entry.get()
+        log(f"Output directory: {output}")
         os.makedirs(output, exist_ok=True)
         total = len(self.selected_files)
+        log(f"Total files to process: {total}")
         
         for i, f in enumerate(self.selected_files, 1):
+            log(f"Processing file {i}/{total}: {f}")
             self.after(0, lambda p=i/total: self.progress.set(p))
             ext = Path(f).suffix.lower()
             pdf = None
             
             if ext == ".pdf":
+                log(f"Direct PDF conversion: {f}")
                 self.after(0, lambda n=Path(f).name: self.status.configure(text=f"Converting PDF: {n}"))
                 self.convert_pdf(f, output)
             else:
+                log(f"Converting .one to PDF: {f}")
                 self.after(0, lambda n=Path(f).name: self.status.configure(text=f"Converting .one to PDF: {n}"))
                 pdf = self.convert_one_to_pdf(f, output)
+                log(f"PDF result: {pdf}")
                 if pdf and os.path.exists(pdf):
+                    log(f"PDF exists, converting to MD: {pdf}")
                     self.after(0, lambda n=Path(pdf).name: self.status.configure(text=f"Converting PDF to MD: {n}"))
                     self.convert_pdf(pdf, output)
+                    log(f"Markdown created from PDF")
                 else:
+                    log(f"PDF creation failed, using fallback direct extract")
                     self.after(0, lambda n=Path(f).name: self.status.configure(text=f"Fallback extract: {n}"))
                     self.convert_one_direct(f, output)
 
+        log("Export complete!")
         self.after(0, lambda: self.status.configure(text="Done!"))
         self.after(0, lambda: self.export_btn.configure(state="normal", text="Convert to Markdown"))
         self.after(0, lambda: self.progress.set(1))
         self.is_exporting = False
 
     def convert_one_to_pdf(self, one_file, output_dir):
+        log(f"convert_one_to_pdf called with: {one_file}")
         pdf_path = os.path.join(output_dir, Path(one_file).stem + ".pdf")
+        log(f"Target PDF path: {pdf_path}")
         try:
             one_escaped = one_file.replace("\\", "\\\\")
             pdf_escaped = pdf_path.replace("\\", "\\\\")
+            log(f"Running PowerShell OneNote COM...")
             ps = f'''
 $one = New-Object -ComObject OneNote.Application
 $one.OpenHierarchy("{one_escaped}", $false)
 $one.Publish("{one_escaped}", "{pdf_escaped}", 2)
 '''
-            subprocess.run(["powershell", "-Command", ps], capture_output=True, timeout=60)
-            return pdf_path if os.path.exists(pdf_path) else None
-        except:
+            result = subprocess.run(["powershell", "-Command", ps], capture_output=True, text=True, timeout=60)
+            log(f"PowerShell stdout: {result.stdout}")
+            log(f"PowerShell stderr: {result.stderr}")
+            if os.path.exists(pdf_path):
+                log(f"SUCCESS: PDF created at {pdf_path}")
+                return pdf_path
+            else:
+                log(f"FAILURE: PDF not created at {pdf_path}")
+                return None
+        except Exception as e:
+            log(f"ERROR in convert_one_to_pdf: {e}")
             return None
 
     def convert_pdf(self, pdf_path, output_dir):
+        log(f"convert_pdf called with: {pdf_path}")
         text = ""
         try:
             from pdfminer.high_level import extract_text
             text = extract_text(pdf_path)
-        except:
+            log(f"pdfminer extracted {len(text)} chars")
+        except Exception as e:
+            log(f"pdfminer failed: {e}")
             try:
                 import PyPDF2
                 with open(pdf_path, 'rb') as pf:
                     reader = PyPDF2.PdfReader(pf)
                     text = "\n\n".join([p.extract_text() for p in reader.pages if p.extract_text()])
-            except:
+                    log(f"PyPDF2 extracted {len(text)} chars")
+            except Exception as e2:
+                log(f"PyPDF2 failed: {e2}")
                 pass
         if not text:
             text = "[Could not extract]"
+            log("No text extracted from PDF")
         
         md = f"# {Path(pdf_path).stem}\n\n" + self.format_text(text)
         out = Path(output_dir) / f"{Path(pdf_path).stem}.md"
         with open(out, 'w', encoding='utf-8') as f:
             f.write(md)
+        log(f"Markdown saved to: {out}")
 
     def format_text(self, text):
         import re
@@ -185,13 +224,16 @@ $one.Publish("{one_escaped}", "{pdf_escaped}", 2)
         return '\n'.join(lines)
 
     def convert_one_direct(self, one_file, output_dir):
+        log(f"convert_one_direct called with: {one_file}")
         try:
             with open(one_file, 'rb') as f:
                 data = f.read()
+            log(f"Read {len(data)} bytes from .one file")
             for enc in ['utf-16-le', 'utf-8', 'latin-1']:
                 try:
                     text = data.decode(enc, errors='ignore')
                     if len(text) > 100:
+                        log(f"Decoded with {enc}: {len(text)} chars")
                         break
                 except:
                     continue
@@ -200,10 +242,12 @@ $one.Publish("{one_escaped}", "{pdf_escaped}", 2)
             out = Path(output_dir) / f"{Path(one_file).stem}.md"
             with open(out, 'w', encoding='utf-8') as f:
                 f.write(md)
-        except:
-            pass
+            log(f"Direct extract saved to: {out}")
+        except Exception as e:
+            log(f"ERROR in convert_one_direct: {e}")
 
 
 if __name__ == "__main__":
+    log("Starting app...")
     app = OneNote2MDApp()
     app.mainloop()
