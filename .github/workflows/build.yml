@@ -26,7 +26,16 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onefile --name onenote2md --hidden-import=customtkinter --hidden-import=tkinter onenote2md/gui.py
+          pip install pyinstaller
+          pyinstaller --onefile `
+            --name onenote2md `
+            --add-data "customtkinter;customtkinter" `
+            --hidden-import=customtkinter `
+            --hidden-import=tkinter `
+            --hidden-import=tkinter.filedialog `
+            --hidden-import=tkinter.messagebox `
+            --collect-all customtkinter `
+            onenote2md/gui.py
 
       - name: Create ZIP
         shell: powershell
