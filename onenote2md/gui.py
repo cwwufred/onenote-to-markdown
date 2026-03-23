@@ -307,13 +307,16 @@ class OneNote2MDApp(ctk.CTk):
                             if notebook:
                                 convert_to_markdown(notebook, output)
                     except Exception as e:
-                        print(f"PDF conversion failed: {e}")
+                        print(f"PDF conversion error: {e}")
                         # Fallback to direct conversion
-                        from onenote2md.local_parser import parse_one_file
-                        from onenote2md.converter import convert_to_markdown
-                        notebook = parse_one_file(f)
-                        if notebook:
-                            convert_to_markdown(notebook, output)
+                        try:
+                            from onenote2md.local_parser import parse_one_file
+                            from onenote2md.converter import convert_to_markdown
+                            notebook = parse_one_file(f)
+                            if notebook:
+                                convert_to_markdown(notebook, output)
+                        except Exception as e2:
+                            print(f"Direct conversion also failed: {e2}")
                             
                 elif file_ext == '.pdf':
                     # Convert PDF to Markdown
