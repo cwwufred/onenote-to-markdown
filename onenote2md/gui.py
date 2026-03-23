@@ -159,23 +159,43 @@ class OneNote2MDApp(ctk.CTk):
         pdf_path = os.path.join(output_dir, Path(one_file).stem + ".pdf")
         log(f"Target PDF path: {pdf_path}")
         try:
-            one_escaped = one_file.replace("\\", "\\\\")
-            pdf_escaped = pdf_path.replace("\\", "\\\\")
-            log(f"Running PowerShell OneNote COM...")
+            one_abs = os.path.abspath(one_file)
+            pdf_abs = os.path.abspath(pdf_path)
+            log(f"Absolute paths: {one_abs} -> {pdf_abs}")
+            
+            # Try different OneNote COM approaches
             ps = f'''
 $one = New-Object -ComObject OneNote.Application
-$one.OpenHierarchy("{one_escaped}", $false)
-$one.Publish("{one_escaped}", "{pdf_escaped}", 2)
+$one.OpenHierarchy("{one_abs}", $null, [ref]$null)
+$one.Publish("{one_abs}", "{pdf_abs}", 2)
 '''
+            log(f"Trying OneNote COM publish method...")
             result = subprocess.run(["powershell", "-Command", ps], capture_output=True, text=True, timeout=60)
             log(f"PowerShell stdout: {result.stdout}")
             log(f"PowerShell stderr: {result.stderr}")
+            
             if os.path.exists(pdf_path):
                 log(f"SUCCESS: PDF created at {pdf_path}")
                 return pdf_path
-            else:
-                log(f"FAILURE: PDF not created at {pdf_path}")
-                return None
+            
+            # Try alternative: Use OneNote PrintOut
+            log(f"Trying alternative print method...")
+            ps2 = f'''
+Add-Type -AssemblyName OneNote
+$app = [Runtime.InteropServices.Marshal]::GetActiveObject("OneNote.Application")
+$app.OpenHierarchy("{one_abs}", $null, [ref]$null) | Out-Null
+Start-Sleep -Milliseconds 500
+$app.Publish("{one_abs}", "{pdf_abs}", 2) | Out-Null
+'''
+            result2 = subprocess.run(["powershell", "-Command", ps2], capture_output=True, text=True, timeout=60)
+            log(f"Alt method stderr: {result2.stderr}")
+            
+            if os.path.exists(pdf_path):
+                log(f"SUCCESS: PDF created with alt method")
+                return pdf_path
+            
+            log(f"FAILURE: PDF not created at {pdf_path}")
+            return None
         except Exception as e:
             log(f"ERROR in convert_one_to_pdf: {e}")
             return None
