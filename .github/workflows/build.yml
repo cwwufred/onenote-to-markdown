@@ -16,20 +16,16 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install pip
-        run: python -m pip install --upgrade pip
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Install pyinstaller
-        run: pip install pyinstaller
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
 
       - name: Build
-        run: pyinstaller --onefile --name onenote2md onenote2md/gui.py
+        run: pyinstaller --onefile --console onenote2md/gui.py
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: exe
+          name: onenote2md
           path: dist/onenote2md.exe
