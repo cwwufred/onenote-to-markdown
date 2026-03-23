@@ -24,18 +24,18 @@ jobs:
 
       - name: Build
         run: |
-          pyinstaller --onefile --console onenote2md/gui.py
-          dir dist
-
-      - name: Create ZIP
-        run: |
+          pyinstaller --onefile --console onenote2md/gui.py --clean 2>&1
           if (Test-Path dist/onenote2md.exe) {
-            Compress-Archive -Path dist/onenote2md.exe -DestinationPath onenote2md-windows.zip -Force
+            Write-Host "SUCCESS: exe created"
+            Get-Item dist/onenote2md.exe
           } else {
-            Write-Host "ERROR: exe not found"
-            Get-ChildItem -Recurse
+            Write-Host "FAILURE: exe not created"
+            Get-ChildItem -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue
             exit 1
           }
+
+      - name: Create ZIP
+        run: Compress-Archive -Path dist/onenote2md.exe -DestinationPath onenote2md-windows.zip -Force
 
       - name: Upload
         uses: actions/upload-artifact@v4
