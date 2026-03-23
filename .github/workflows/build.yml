@@ -26,18 +26,18 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onedir --name onenote2md onenote2md/gui.py
-          
+          pyinstaller --onefile --name onenote2md --console onenote2md/gui.py
+
       - name: Create ZIP
         shell: powershell
         run: |
-          Compress-Archive -Path onenote2md\* -DestinationPath onenote2md-win.zip -Force
+          Compress-Archive -Path dist\onenote2md.exe -DestinationPath onenote2md.exe.zip -Force
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: onenote2md-windows
-          path: onenote2md-win.zip
+          path: onenote2md.exe.zip
 
   release:
     needs: build
@@ -54,7 +54,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: onenote2md-win.zip
+          files: onenote2md.exe.zip
           draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
