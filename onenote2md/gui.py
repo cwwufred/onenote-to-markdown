@@ -153,10 +153,14 @@ class OneNote2MDApp(ctk.CTk):
             self.refresh_files()
             
     def browse_source_files(self):
-        """Browse for specific .one files."""
+        """Browse for specific .one or PDF files."""
         files = filedialog.askopenfilenames(
-            title="Select OneNote Files",
-            filetypes=[("OneNote files", "*.one"), ("All files", "*.*")]
+            title="Select OneNote/PDF Files",
+            filetypes=[
+                ("OneNote files", "*.one"),
+                ("PDF files", "*.pdf"),
+                ("All files", "*.*")
+            ]
         )
         if files:
             self.selected_files = list(files)
@@ -280,18 +284,54 @@ class OneNote2MDApp(ctk.CTk):
                 self.after(0, lambda p=progress: self.progress.set(p))
                 self.after(0, lambda i=idx, t=total, n=Path(f).name: self.set_status(f"📥 Exporting: {n} ({i}/{t})", "blue"))
                 
-                # Parse and convert
-                from onenote2md.local_parser import parse_one_file
-                from onenote2md.converter import convert_to_markdown
+                # Check file type
+                file_ext = Path(f).suffix.lower()
                 
-                notebook = parse_one_file(f)
-                if notebook:
-                    convert_to_markdown(notebook, output)
+                if file_ext == '.one':
+                    # Convert .one to PDF first
+                    self.after(0, lambda n=Path(f).name: self.set_status(f"🔄 Converting to PDF: {n}", "orange"))
+                    
+                    try:
+                        from onenote2md.one_to_pdf import convert_one_to_pdf
+                        pdf_path = convert_one_to_pdf(f, output)
+                        
+                        if pdf_path and os.path.exists(pdf_path):
+                            self.after(0, lambda p=pdf_path: self.set_status(f"📄 Converting PDF to Markdown: {Path(p).name}", "blue"))
+                            from onenote2md.pdf_converter import pdf_to_markdown
+                            pdf_to_markdown(pdf_path, output)
+                        else:
+                            # Fallback: try direct conversion
+                            from onenote2md.local_parser import parse_one_file
+                            from onenote2md.converter import convert_to_markdown
+                            notebook = parse_one_file(f)
+                            if notebook:
+                                convert_to_markdown(notebook, output)
+                    except Exception as e:
+                        print(f"PDF conversion failed: {e}")
+                        # Fallback to direct conversion
+                        from onenote2md.local_parser import parse_one_file
+                        from onenote2md.converter import convert_to_markdown
+                        notebook = parse_one_file(f)
+                        if notebook:
+                            convert_to_markdown(notebook, output)
+                            
+                elif file_ext == '.pdf':
+                    # Convert PDF to Markdown
+                    from onenote2md.pdf_converter import pdf_to_markdown
+                    pdf_to_markdown(f, output)
+                    
+                else:
+                    # Try direct conversion
+                    from onenote2md.local_parser import parse_one_file
+                    from onenote2md.converter import convert_to_markdown
+                    notebook = parse_one_file(f)
+                    if notebook:
+                        convert_to_markdown(notebook, output)
                     
             self.after(0, lambda: self.set_status(f"✅ Exported {total} file(s) successfully!", "green"))
                 
         except Exception as e:
-            self.after(0, lambda: self.set_status(f"❌ Export failed: {e}", "red"))
+            self.after(0, lambda err=str(e): self.set_status(f"❌ Export failed: {err}", "red"))
             
         finally:
             self.is_exporting = False
