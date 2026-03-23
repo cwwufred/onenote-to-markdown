@@ -5,6 +5,7 @@ OneNote to Markdown Converter - All-in-one GUI
 import customtkinter as ctk
 import os
 import sys
+import subprocess
 import threading
 from pathlib import Path
 from tkinter import filedialog
@@ -79,6 +80,10 @@ class OneNote2MDApp(ctk.CTk):
         title = ctk.CTkLabel(main_frame, text="📝 OneNote to Markdown Converter", font=ctk.CTkFont(size=28, weight="bold"))
         title.pack(pady=(0, 20))
         
+        # Info
+        info = ctk.CTkLabel(main_frame, text="💡 Select .one files → Converts to PDF → Converts to Markdown", font=ctk.CTkFont(size=12))
+        info.pack(pady=(0, 10))
+        
         # Settings
         settings_frame = ctk.CTkFrame(main_frame)
         settings_frame.pack(fill="x", pady=(0, 15))
@@ -136,7 +141,7 @@ class OneNote2MDApp(ctk.CTk):
         self.status_label = ctk.CTkLabel(button_row, text="Ready - Select files to convert", font=ctk.CTkFont(size=12))
         self.status_label.pack(side="left")
         
-        self.export_btn = ctk.CTkButton(button_row, text="📥 Export to Markdown", font=ctk.CTkFont(size=14, weight="bold"), height=40, command=self.start_export)
+        self.export_btn = ctk.CTkButton(button_row, text="📥 Convert to Markdown", font=ctk.CTkFont(size=14, weight="bold"), height=40, command=self.start_export)
         self.export_btn.pack(side="right")
         
     def browse_source_files(self):
@@ -183,7 +188,7 @@ class OneNote2MDApp(ctk.CTk):
             return
             
         self.is_exporting = True
-        self.export_btn.configure(state="disabled", text="⏳ Exporting...")
+        self.export_btn.configure(state="disabled", text="⏳ Converting...")
         self.progress.set(0)
         
         self.export_thread = threading.Thread(target=self.run_export, args=(output,))
@@ -198,14 +203,24 @@ class OneNote2MDApp(ctk.CTk):
             for idx, f in enumerate(self.selected_files, 1):
                 progress = idx / total
                 self.after(0, lambda p=progress: self.progress.set(p))
-                self.after(0, lambda i=idx, t=total, n=Path(f).name: self.set_status(f"Converting: {n} ({i}/{t})", "blue"))
                 
                 ext = Path(f).suffix.lower()
                 
                 if ext == '.pdf':
+                    self.after(0, lambda i=idx, t=total, n=Path(f).name: self.set_status(f"📄 Converting PDF: {n} ({i}/{t})", "blue"))
                     self.convert_pdf_to_md(f, output)
                 else:
-                    self.convert_to_md(f, output)
+                    # .one file - convert via PDF
+                    self.after(0, lambda i=idx, t=total, n=Path(f).name: self.set_status(f"🔄 Converting .one → PDF: {n} ({i}/{t})", "orange"))
+                    pdf_path = self.convert_one_to_pdf(f, output)
+                    
+                    if pdf_path and os.path.exists(pdf_path):
+                        self.after(0, lambda p=pdf_path: self.set_status(f"📄 Converting PDF → Markdown: {Path(p).name}", "blue"))
+                        self.convert_pdf_to_md(pdf_path, output)
+                    else:
+                        # Fallback: direct conversion
+                        self.after(0, lambda n=Path(f).name: self.set_status(f"⚠️ PDF failed, trying direct: {n}", "orange"))
+                        self.convert_one_direct(f, output)
                     
             self.after(0, lambda: self.set_status(f"✅ Exported {total} file(s)!", "green"))
                 
@@ -215,55 +230,171 @@ class OneNote2MDApp(ctk.CTk):
             self.is_exporting = False
             self.after(0, self.reset_export)
             
+    def convert_one_to_pdf(self, one_file, output_dir) -> str:
+        """Convert .one file to PDF using OneNote."""
+        
+        pdf_path = os.path.join(output_dir, Path(one_file).stem + ".pdf")
+        
+        try:
+            # Method 1: Try OneNote COM via PowerShell
+            ps_script = f'''
+$oneNote = New-Object -ComObject OneNote.Application
+$oneNote.OpenHierarchy("{one_file.replace("\\", "\\\\")}", $false)
+$oneNote.Publish("{one_file.replace("\\", "\\\\")}", "{pdf_path.replace("\\", "\\\\")}", 2)
+'''
+            
+            result = subprocess.run(
+                ['powershell', '-Command', ps_script],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            if result.returncode == 0 and os.path.exists(pdf_path):
+                return pdf_path
+                
+        except Exception as e:
+            print(f"COM method failed: {e}")
+            
+        return None
+        
     def convert_pdf_to_md(self, pdf_path, output_dir):
         """Convert PDF to Markdown."""
         try:
-            # Try pdfminer first
+            text = ""
+            
+            # Try pdfminer
             try:
                 from pdfminer.high_level import extract_text
                 text = extract_text(pdf_path)
             except:
-                # Fallback to PyPDF2
+                pass
+                
+            # Fallback to PyPDF2
+            if not text or len(text) < 50:
                 try:
                     import PyPDF2
                     with open(pdf_path, 'rb') as pf:
                         reader = PyPDF2.PdfReader(pf)
-                        text = '\n\n'.join([p.extract_text() for p in reader.pages])
+                        pages_text = []
+                        for p in reader.pages:
+                            txt = p.extract_text()
+                            if txt:
+                                pages_text.append(txt)
+                        text = '\n\n'.join(pages_text)
                 except:
-                    text = "[Could not extract PDF text]"
+                    pass
                     
-            # Convert to markdown
-            lines = text.split('\n')
-            md_lines = []
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    md_lines.append('')
-                elif len(line) < 50 and line.isupper():
-                    md_lines.append(f"## {line}")
-                elif len(line) < 40 and not line.endswith(('.', ',')):
-                    md_lines.append(f"### {line}")
-                else:
-                    md_lines.append(line)
-                    
-            md_content = '\n'.join(md_lines)
+            if not text or len(text) < 50:
+                text = "[Could not extract text from PDF]"
+                
+            # Convert to Markdown with better formatting
+            md = self.text_to_markdown(text)
             
             # Save
             out_path = Path(output_dir) / f"{Path(pdf_path).stem}.md"
-            with open(out_path, 'w', encoding='utf-8') as wf:
-                wf.write(md_content)
+            with open(out_path, 'w', encoding='utf-8') as f:
+                f.write(md)
                 
         except Exception as e:
-            print(f"PDF conversion error: {e}")
+            print(f"PDF to MD error: {e}")
+            # Save error message
+            out_path = Path(output_dir) / f"{Path(pdf_path).stem}.md"
+            with open(out_path, 'w', encoding='utf-8') as f:
+                f.write(f"# {Path(pdf_path).stem}\n\n[Conversion error: {str(e)}]")
+                
+    def text_to_markdown(self, text: str) -> str:
+        """Convert text to better formatted Markdown."""
+        lines = text.split('\n')
+        md_lines = []
+        
+        # Track context
+        in_table = False
+        table_lines = []
+        
+        for line in lines:
+            line = line.strip()
             
-    def convert_to_md(self, file_path, output_dir):
-        """Convert .one file to Markdown."""
+            if not line:
+                if in_table:
+                    # End table
+                    md_lines.extend(table_lines)
+                    md_lines.append('')
+                    table_lines = []
+                    in_table = False
+                md_lines.append('')
+                continue
+                
+            # Detect tables (lines with multiple spaces or |)
+            if '|' in line and line.count('|') >= 2:
+                if not in_table:
+                    in_table = True
+                    table_lines = []
+                    
+                # Format table row
+                cells = [c.strip() for c in line.split('|')]
+                cells = [c for c in cells if c]  # Remove empty
+                
+                if all(c.replace('-', '').replace(':', '') == '' for c in cells):
+                    # Skip separator line
+                    continue
+                    
+                table_lines.append(line)
+                
+            elif in_table:
+                # End table before processing this line
+                md_lines.extend(table_lines)
+                md_lines.append('')
+                table_lines = []
+                in_table = False
+                
+                # Process as normal line
+                md_lines.append(self.format_line(line))
+            else:
+                # Normal line - apply formatting
+                md_lines.append(self.format_line(line))
+                
+        # Close any open table
+        if in_table and table_lines:
+            md_lines.extend(table_lines)
+            
+        # Build markdown
+        md = f"# {Path(pdf_path).stem if 'pdf_path' in locals() else 'Document'}\n\n"
+        md += '\n'.join(md_lines)
+        
+        return md
+        
+    def format_line(self, line: str) -> str:
+        """Format a line with basic markdown."""
+        
+        # Detect headings (short lines, all caps, or numbered sections)
+        if len(line) < 60 and line.isupper():
+            return f"## {line}"
+        elif len(line) < 50 and not line.endswith(('.', ',', ':', ';', ')')):
+            return f"### {line}"
+            
+        # Bold text **text**
+        import re
+        line = re.sub(r'\*\*(.+?)\*\*', r'**\1**', line)
+        
+        # Italic *text*
+        line = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'*\1*', line)
+        
+        # Links [text](url)
+        line = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'[\1](\2)', line)
+        
+        # Clean up extra spaces
+        line = re.sub(r'\s+', ' ', line)
+        
+        return line
+        
+    def convert_one_direct(self, one_file, output_dir):
+        """Fallback: Direct conversion of .one file."""
         try:
-            # Read file
-            with open(file_path, 'rb') as f:
+            with open(one_file, 'rb') as f:
                 data = f.read()
                 
-            # Try different encodings
+            # Try to extract text
             text = ""
             for enc in ['utf-16-le', 'utf-8', 'latin-1']:
                 try:
@@ -273,7 +404,10 @@ class OneNote2MDApp(ctk.CTk):
                 except:
                     continue
                     
-            # Clean text
+            if not text:
+                text = "[Could not extract content from .one file]"
+                
+            # Clean
             text = text.replace('\x00', '')
             lines = []
             for line in text.split('\n'):
@@ -283,15 +417,14 @@ class OneNote2MDApp(ctk.CTk):
                     
             content = '\n\n'.join(lines[:500])
             
-            # Save markdown
-            md = f"# {Path(file_path).stem}\n\n{content}\n"
+            md = f"# {Path(one_file).stem}\n\n{content}\n"
             
-            out_path = Path(output_dir) / f"{Path(file_path).stem}.md"
+            out_path = Path(output_dir) / f"{Path(one_file).stem}.md"
             with open(out_path, 'w', encoding='utf-8') as f:
                 f.write(md)
                 
         except Exception as e:
-            print(f"Conversion error: {e}")
+            print(f"Direct conversion error: {e}")
             
     def set_status(self, message, color):
         """Set status message."""
@@ -300,7 +433,7 @@ class OneNote2MDApp(ctk.CTk):
         
     def reset_export(self):
         """Reset export button."""
-        self.export_btn.configure(state="normal", text="📥 Export to Markdown")
+        self.export_btn.configure(state="normal", text="📥 Convert to Markdown")
         self.progress.set(1)
         
 
