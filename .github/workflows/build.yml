@@ -15,9 +15,9 @@ jobs:
           - os: windows-latest
             output: onenote2md.exe
           - os: macos-latest
-            output: onenote2md
+            output: onenote2md-macos
           - os: ubuntu-latest
-            output: onenote2md
+            output: onenote2md-linux
 
     steps:
       - uses: actions/checkout@v4
@@ -36,24 +36,12 @@ jobs:
       - name: Build executable
         run: |
           pyinstaller --onefile --name ${{ matrix.output }} onenote2md/gui.py
-        shell: bash
-
-      - name: Create ZIP
-        run: |
-          cd dist
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            powershell -Command "Compress-Archive -Path onenote2md.exe -DestinationPath onenote2md.exe.zip -Force"
-          else
-            zip ${{ matrix.output }}.zip ${{ matrix.output }}
-          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.output }}-${{ matrix.os }}
-          path: |
-            dist/${{ matrix.output }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
-            dist/${{ matrix.output }}.zip
+          name: ${{ matrix.output }}
+          path: dist/${{ matrix.output }}*
 
   release:
     needs: build
@@ -66,11 +54,15 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: |
+            artifacts/onenote2md.exe
+            artifacts/onenote2md-macos
+            artifacts/onenote2md-linux
           draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
