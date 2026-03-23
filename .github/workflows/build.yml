@@ -38,11 +38,18 @@ jobs:
           pyinstaller --onefile --name ${{ matrix.output }} onenote2md/gui.py
         shell: bash
 
+      - name: Create ZIP
+        run: |
+          cd dist
+          zip ${{ matrix.output }}.zip ${{ matrix.output }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.output }}-${{ matrix.os }}
-          path: dist/${{ matrix.output }}*
+          path: |
+            dist/${{ matrix.output }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+            dist/${{ matrix.output }}.zip
 
   release:
     needs: build
