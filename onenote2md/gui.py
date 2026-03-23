@@ -113,6 +113,7 @@ class OneNote2MDApp(ctk.CTk):
         for i, f in enumerate(self.selected_files, 1):
             self.after(0, lambda p=i/total: self.progress.set(p))
             ext = Path(f).suffix.lower()
+            pdf = None
             
             if ext == ".pdf":
                 self.after(0, lambda n=Path(f).name: self.status.configure(text=f"Converting PDF: {n}"))
@@ -124,10 +125,8 @@ class OneNote2MDApp(ctk.CTk):
                     self.after(0, lambda n=Path(pdf).name: self.status.configure(text=f"Converting PDF to MD: {n}"))
                     self.convert_pdf(pdf, output)
                 else:
+                    self.after(0, lambda n=Path(f).name: self.status.configure(text=f"Fallback extract: {n}"))
                     self.convert_one_direct(f, output)
-            # Keep the intermediate PDF file
-            if ext == ".one" and pdf and os.path.exists(pdf):
-                pass  # PDF is already in output folder
 
         self.after(0, lambda: self.status.configure(text="Done!"))
         self.after(0, lambda: self.export_btn.configure(state="normal", text="Convert to Markdown"))
