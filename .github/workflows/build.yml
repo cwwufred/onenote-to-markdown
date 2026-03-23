@@ -23,10 +23,19 @@ jobs:
           pip install pyinstaller
 
       - name: Build
-        run: pyinstaller --onefile --console onenote2md/gui.py
+        run: |
+          pyinstaller --onefile --console onenote2md/gui.py
+          dir dist
 
       - name: Create ZIP
-        run: Compress-Archive -Path dist/onenote2md.exe -DestinationPath onenote2md-windows.zip -Force
+        run: |
+          if (Test-Path dist/onenote2md.exe) {
+            Compress-Archive -Path dist/onenote2md.exe -DestinationPath onenote2md-windows.zip -Force
+          } else {
+            Write-Host "ERROR: exe not found"
+            Get-ChildItem -Recurse
+            exit 1
+          }
 
       - name: Upload
         uses: actions/upload-artifact@v4
