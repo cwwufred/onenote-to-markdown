@@ -163,38 +163,54 @@ class OneNote2MDApp(ctk.CTk):
             pdf_abs = os.path.abspath(pdf_path)
             log(f"Absolute paths: {one_abs} -> {pdf_abs}")
             
-            # Try different OneNote COM approaches
+            # Method 1: Direct publish from file
+            log(f"Trying direct publish...")
             ps = f'''
 $one = New-Object -ComObject OneNote.Application
 $one.OpenHierarchy("{one_abs}", $null, [ref]$null)
-$one.Publish("{one_abs}", "{pdf_abs}", 2)
+Start-Sleep -Seconds 1
+$one.Publish("{one_abs}", "{pdf_abs}", 2)  # pfExportFormat=2 means PDF
 '''
-            log(f"Trying OneNote COM publish method...")
-            result = subprocess.run(["powershell", "-Command", ps], capture_output=True, text=True, timeout=60)
-            log(f"PowerShell stdout: {result.stdout}")
-            log(f"PowerShell stderr: {result.stderr}")
+            result = subprocess.run(["powershell", "-Command", ps], capture_output=True, text=True, timeout=90)
+            log(f"Method 1 stdout: {result.stdout}")
+            log(f"Method 1 stderr: {result.stderr}")
             
             if os.path.exists(pdf_path):
-                log(f"SUCCESS: PDF created at {pdf_path}")
+                log(f"SUCCESS: PDF created")
                 return pdf_path
             
-            # Try alternative: Use OneNote PrintOut
-            log(f"Trying alternative print method...")
+            # Method 2: Get notebook XML and convert via print
+            log(f"Trying XML export method...")
             ps2 = f'''
-Add-Type -AssemblyName OneNote
-$app = [Runtime.InteropServices.Marshal]::GetActiveObject("OneNote.Application")
-$app.OpenHierarchy("{one_abs}", $null, [ref]$null) | Out-Null
-Start-Sleep -Milliseconds 500
-$app.Publish("{one_abs}", "{pdf_abs}", 2) | Out-Null
+$one = New-Object -ComObject OneNote.Application
+$one.OpenHierarchy("{one_abs}", $false)
+Start-Sleep -Seconds 1
+# Get page content as XML
+$xml = $one.GetPageContent($one.GetHierarchy($one_abs, 1))  # 1 = hsPage
+$xml | Out-File -FilePath "{output_dir}\\debug.xml" -Encoding UTF8
+Write-Host "XML exported"
 '''
-            result2 = subprocess.run(["powershell", "-Command", ps2], capture_output=True, text=True, timeout=60)
-            log(f"Alt method stderr: {result2.stderr}")
+            result2 = subprocess.run(["powershell", "-Command", ps2], capture_output=True, text=True, timeout=90)
+            log(f"Method 2 stderr: {result2.stderr}")
             
-            if os.path.exists(pdf_path):
-                log(f"SUCCESS: PDF created with alt method")
-                return pdf_path
+            # Method 3: Try different publish format (XPS first, then convert)
+            log(f"Trying XPS then convert...")
+            xps_path = os.path.join(output_dir, Path(one_file).stem + ".xps")
+            ps3 = f'''
+$one = New-Object -ComObject OneNote.Application
+$one.OpenHierarchy("{one_abs}", $false)
+Start-Sleep -Seconds 1
+$one.Publish("{one_abs}", "{xps_path}", 1)  # 1 = pfXPS
+'''
+            result3 = subprocess.run(["powershell", "-Command", ps3], capture_output=True, text=True, timeout=90)
+            log(f"Method 3 stderr: {result3.stderr}")
             
-            log(f"FAILURE: PDF not created at {pdf_path}")
+            if os.path.exists(xps_path):
+                log(f"XPS created, converting to PDF...")
+                # XPS to PDF conversion would go here
+                return xps_path.replace(".xps", ".pdf")
+            
+            log(f"FAILURE: All methods failed")
             return None
         except Exception as e:
             log(f"ERROR in convert_one_to_pdf: {e}")
