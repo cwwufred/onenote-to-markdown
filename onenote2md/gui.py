@@ -259,20 +259,54 @@ $item.InvokeVerb("Print")
             with open(one_file, 'rb') as f:
                 data = f.read()
             log(f"Read {len(data)} bytes from .one file")
-            for enc in ['utf-16-le', 'utf-8', 'latin-1']:
+            
+            # Try many encodings for Unicode/UTF-8 support
+            encodings = [
+                'utf-16-le', 'utf-16-be', 'utf-16',
+                'utf-8', 'utf-8-sig',
+                'cp1252', 'latin-1',
+                'iso-8859-1', 'cp1250', 'cp1251',
+                'big5', 'shift_jis', 'euc-kr'
+            ]
+            
+            text = None
+            used_encoding = None
+            for enc in encodings:
                 try:
                     text = data.decode(enc, errors='ignore')
+                    # Check if it looks like valid text (not mostly nulls or control chars)
                     if len(text) > 100:
-                        log(f"Decoded with {enc}: {len(text)} chars")
-                        break
+                        valid_ratio = sum(1 for c in text[:1000] if c.isprintable() or c in '\n\r\t ') / min(1000, len(text))
+                        if valid_ratio > 0.7:
+                            used_encoding = enc
+                            log(f"Decoded with {enc}: {len(text)} chars, validity: {valid_ratio:.2f}")
+                            break
                 except:
                     continue
-            text = '\n'.join([l.strip() for l in text.split('\n') if l.strip() and len(l.strip()) > 2])
-            md = f"# {Path(one_file).stem}\n\n{text[:10000]}\n"
+            
+            if text is None or len(text) < 100:
+                text = data.decode('utf-8', errors='replace')
+                used_encoding = 'utf-8-replace'
+                log(f"Fallback to {used_encoding}")
+            
+            # Clean up the extracted text
+            lines = []
+            for line in text.split('\n'):
+                line = line.strip()
+                # Keep lines with meaningful content
+                if line and len(line) > 1:
+                    # Try to clean up garbled XML artifacts
+                    line = line.replace('\x00', '')
+                    if len(line) > 1:
+                        lines.append(line)
+            
+            text = '\n'.join(lines[:500])  # Limit to 500 lines
+            
+            md = f"# {Path(one_file).stem}\n\n{text[:15000]}\n"
             out = Path(output_dir) / f"{Path(one_file).stem}.md"
             with open(out, 'w', encoding='utf-8') as f:
                 f.write(md)
-            log(f"Direct extract saved to: {out}")
+            log(f"Direct extract saved to: {out} (encoding: {used_encoding})")
         except Exception as e:
             log(f"ERROR in convert_one_direct: {e}")
 
