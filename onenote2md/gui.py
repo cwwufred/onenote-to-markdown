@@ -125,6 +125,9 @@ class OneNote2MDApp(ctk.CTk):
                     self.convert_pdf(pdf, output)
                 else:
                     self.convert_one_direct(f, output)
+            # Keep the intermediate PDF file
+            if ext == ".one" and pdf and os.path.exists(pdf):
+                pass  # PDF is already in output folder
 
         self.after(0, lambda: self.status.configure(text="Done!"))
         self.after(0, lambda: self.export_btn.configure(state="normal", text="Convert to Markdown"))
