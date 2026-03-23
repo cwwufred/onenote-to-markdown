@@ -34,8 +34,9 @@ class OneNote2MDApp(ctk.CTk):
 
     def save_config(self, cfg):
         import json
-        Path.home() / ".onenote2md").mkdir(parents=True, exist_ok=True)
-        with open(Path.home() / ".onenote2md" / "config.json", 'w') as f:
+        config_dir = Path.home() / ".onenote2md"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        with open(config_dir / "config.json", 'w') as f:
             json.dump(cfg, f)
 
     def setup_ui(self):
