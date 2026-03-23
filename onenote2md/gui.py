@@ -32,6 +32,7 @@ class OneNote2MDApp(ctk.CTk):
         
         # State
         self.one_files = []
+        self.selected_files = []
         self.export_thread = None
         self.is_exporting = False
         
@@ -58,17 +59,18 @@ class OneNote2MDApp(ctk.CTk):
         settings_frame.pack(fill="x", pady=(0, 15))
         
         # Source folder
-        source_label = ctk.CTkLabel(settings_frame, text="📁 Source Folder", font=ctk.CTkFont(size=14, weight="bold"))
+        source_label = ctk.CTkLabel(settings_frame, text="📁 Source Folder / Files", font=ctk.CTkFont(size=14, weight="bold"))
         source_label.pack(anchor="w", padx=15, pady=(10, 5))
         
         source_row = ctk.CTkFrame(settings_frame, fg_color="transparent")
         source_row.pack(fill="x", padx=15, pady=5)
         
-        self.source_entry = ctk.CTkEntry(source_row, width=500, placeholder_text="Select folder containing .one files...")
+        self.source_entry = ctk.CTkEntry(source_row, width=400, placeholder_text="Select folder or files...")
         self.source_entry.insert(0, self.cfg.get("source_folder", ""))
         self.source_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
         
-        ctk.CTkButton(source_row, text="Browse", width=100, command=self.browse_source).pack(side="right")
+        ctk.CTkButton(source_row, text="Browse Folder", width=120, command=self.browse_source_folder).pack(side="left", padx=5)
+        ctk.CTkButton(source_row, text="Select Files", width=120, command=self.browse_source_files).pack(side="left", padx=5)
         
         # Output folder
         output_label = ctk.CTkLabel(settings_frame, text="📂 Output Folder", font=ctk.CTkFont(size=14, weight="bold"))
@@ -81,22 +83,7 @@ class OneNote2MDApp(ctk.CTk):
         self.output_entry.insert(0, self.cfg.get("output_dir", "./output"))
         self.output_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
         
-        ctk.CTkButton(output_row, text="Browse", width=100, command=self.browse_output).pack(side="right")
-        
-        # Options
-        options_frame = ctk.CTkFrame(main_frame)
-        options_frame.pack(fill="x", pady=(0, 15))
-        
-        ctk.CTkLabel(options_frame, text="⚙️ Options", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=15, pady=(10, 5))
-        
-        options_row = ctk.CTkFrame(options_frame, fg_color="transparent")
-        options_row.pack(fill="x", padx=15, pady=5)
-        
-        self.structure_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(options_row, text="Preserve folder structure", variable=self.structure_var).pack(side="left", padx=10)
-        
-        self.embed_images_var = ctk.BooleanVar(value=self.cfg.get("embed_images", True))
-        ctk.CTkCheckBox(options_row, text="Embed images", variable=self.embed_images_var).pack(side="left", padx=10)
+        ctk.CTkButton(output_row, text="Browse", width=80, command=self.browse_output).pack(side="right")
         
         # ===== Files Section =====
         files_frame = ctk.CTkFrame(main_frame)
@@ -105,7 +92,7 @@ class OneNote2MDApp(ctk.CTk):
         files_header = ctk.CTkFrame(files_frame, fg_color="transparent")
         files_header.pack(fill="x", padx=15, pady=(10, 5))
         
-        ctk.CTkLabel(files_header, text="📄 OneNote Files", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        ctk.CTkLabel(files_header, text="📄 Selected Files", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
         
         ctk.CTkButton(
             files_header, 
@@ -139,12 +126,12 @@ class OneNote2MDApp(ctk.CTk):
         button_row = ctk.CTkFrame(export_frame, fg_color="transparent")
         button_row.pack(fill="x")
         
-        self.status_label = ctk.CTkLabel(button_row, text="Ready", font=ctk.CTkFont(size=12))
+        self.status_label = ctk.CTkLabel(button_row, text="Ready - Select files or folder to start", font=ctk.CTkFont(size=12))
         self.status_label.pack(side="left")
         
         self.export_btn = ctk.CTkButton(
             button_row,
-            text="📥 Export All to Markdown",
+            text="📥 Export to Markdown",
             font=ctk.CTkFont(size=14, weight="bold"),
             height=40,
             command=self.start_export
@@ -154,7 +141,7 @@ class OneNote2MDApp(ctk.CTk):
         # Load files on startup
         self.after(100, self.refresh_files)
         
-    def browse_source(self):
+    def browse_source_folder(self):
         """Browse for source folder."""
         folder = filedialog.askdirectory(title="Select OneNote Backup Folder")
         if folder:
@@ -162,7 +149,20 @@ class OneNote2MDApp(ctk.CTk):
             self.source_entry.insert(0, folder)
             self.cfg["source_folder"] = folder
             config.save_config(self.cfg)
+            self.selected_files = []  # Clear selected files
             self.refresh_files()
+            
+    def browse_source_files(self):
+        """Browse for specific .one files."""
+        files = filedialog.askopenfilenames(
+            title="Select OneNote Files",
+            filetypes=[("OneNote files", "*.one"), ("All files", "*.*")]
+        )
+        if files:
+            self.selected_files = list(files)
+            self.source_entry.delete(0, "end")
+            self.source_entry.insert(0, f"{len(files)} file(s) selected")
+            self.refresh_selected_files()
             
     def browse_output(self):
         """Browse for output folder."""
@@ -174,13 +174,18 @@ class OneNote2MDApp(ctk.CTk):
             config.save_config(self.cfg)
             
     def refresh_files(self):
-        """Refresh the file list."""
+        """Refresh the file list from folder."""
         source = self.source_entry.get()
         
         self.files_listbox.delete("1.0", "end")
         
+        # Check if we have selected files
+        if self.selected_files:
+            self.refresh_selected_files()
+            return
+            
         if not source:
-            self.files_listbox.insert("1.0", "⚠️ Please configure source folder above")
+            self.files_listbox.insert("1.0", "⚠️ Please select a folder or files above")
             return
             
         if not Path(source).exists():
@@ -208,19 +213,45 @@ class OneNote2MDApp(ctk.CTk):
                 
         self.files_listbox.insert("end", f"\n📊 Total: {len(self.one_files)} file(s)")
         
+    def refresh_selected_files(self):
+        """Show selected files."""
+        self.files_listbox.delete("1.0", "end")
+        
+        if not self.selected_files:
+            self.files_listbox.insert("1.0", "⚠️ No files selected")
+            return
+            
+        for f in self.selected_files:
+            fname = Path(f).name
+            self.files_listbox.insert("end", f"📄 {fname}\n")
+            
+        self.files_listbox.insert("end", f"\n📊 Total: {len(self.selected_files)} file(s) selected")
+        
     def start_export(self):
         """Start export in background thread."""
         if self.is_exporting:
             return
             
-        source = self.source_entry.get()
         output = self.output_entry.get()
         
-        if not source:
-            self.set_status("❌ Please configure source folder", "red")
+        if not output:
+            self.set_status("❌ Please configure output folder", "red")
             return
             
-        if not self.one_files:
+        # Determine source files
+        source = self.source_entry.get()
+        
+        if self.selected_files:
+            # Use selected files
+            files_to_export = self.selected_files
+        elif source and Path(source).exists():
+            # Use folder
+            files_to_export = list_one_files(source)
+        else:
+            self.set_status("⚠️ No files to export", "orange")
+            return
+            
+        if not files_to_export:
             self.set_status("⚠️ No files to export", "orange")
             return
             
@@ -232,43 +263,40 @@ class OneNote2MDApp(ctk.CTk):
         # Start export in background
         self.export_thread = threading.Thread(
             target=self.run_export,
-            args=(source, output)
+            args=(files_to_export, output)
         )
         self.export_thread.start()
         
-    def run_export(self, source: str, output: str):
+    def run_export(self, files, output: str):
         """Run export (called from background thread)."""
         try:
-            # Configure batch exporter with progress callback
-            results = batch_export(
-                source,
-                output,
-                preserve_structure=self.structure_var.get(),
-                progress_callback=self.update_progress
-            )
+            # Create output directory
+            os.makedirs(output, exist_ok=True)
             
-            # Update UI with results
-            successful = sum(1 for r in results if r.success)
-            failed = len(results) - successful
+            total = len(files)
             
-            if failed > 0:
-                self.set_status(f"⚠️ Exported {successful} file(s), {failed} failed", "orange")
-            else:
-                self.set_status(f"✅ Exported {successful} file(s) successfully!", "green")
+            for idx, f in enumerate(files, 1):
+                progress = idx / total
+                self.after(0, lambda p=progress: self.progress.set(p))
+                self.after(0, lambda i=idx, t=total, n=Path(f).name: self.set_status(f"📥 Exporting: {n} ({i}/{t})", "blue"))
+                
+                # Parse and convert
+                from onenote2md.local_parser import parse_one_file
+                from onenote2md.converter import convert_to_markdown
+                
+                notebook = parse_one_file(f)
+                if notebook:
+                    convert_to_markdown(notebook, output)
+                    
+            self.after(0, lambda: self.set_status(f"✅ Exported {total} file(s) successfully!", "green"))
                 
         except Exception as e:
-            self.set_status(f"❌ Export failed: {e}", "red")
+            self.after(0, lambda: self.set_status(f"❌ Export failed: {e}", "red"))
             
         finally:
             self.is_exporting = False
             self.after(0, self.reset_export_button)
             
-    def update_progress(self, current: int, total: int, filename: str):
-        """Update progress bar (called from background thread)."""
-        progress = current / total if total > 0 else 0
-        self.after(0, lambda: self.progress.set(progress))
-        self.after(0, lambda: self.set_status(f"📥 Exporting: {filename}", "blue"))
-        
     def set_status(self, message: str, color: str = "gray"):
         """Set status message."""
         color_map = {
@@ -282,7 +310,7 @@ class OneNote2MDApp(ctk.CTk):
         
     def reset_export_button(self):
         """Reset export button after completion."""
-        self.export_btn.configure(state="normal", text="📥 Export All to Markdown")
+        self.export_btn.configure(state="normal", text="📥 Export to Markdown")
         self.progress.set(1)
         
 

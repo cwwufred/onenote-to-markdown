@@ -5,6 +5,7 @@ from onenote2md import config
 from onenote2md.local_parser import parse_one_file, list_one_files
 from onenote2md.converter import convert_to_markdown
 from onenote2md.batch_export import batch_export
+from onenote2md.pdf_converter import pdf_to_markdown, list_pdf_files
 
 @click.group()
 def main():
@@ -41,109 +42,93 @@ def show_config():
     click.echo("\n📁 Current Configuration:\n")
     click.echo(f"  Source Folder: {cfg.get('source_folder') or '(not set)'}")
     click.echo(f"  Output Dir:     {cfg.get('output_dir')}")
-    click.echo(f"  Image Folder:   {cfg.get('image_folder')}")
-    click.echo(f"  Embed Images:   {cfg.get('embed_images')}")
     click.echo("")
 
 @main.command('list')
-def list_files():
-    """List all .one files in source folder."""
+@click.option('--type', type=click.Choice(['one', 'pdf', 'all']), default='one', help='File type to list')
+def list_files(type):
+    """List files in source folder."""
     source = config.get_source_folder()
     
     if not source:
         click.echo("❌ Source folder not set. Run:")
-        click.echo("   onenote2md config set-source /path/to/onenote/backup")
+        click.echo("   onenote2md config set-source /path/to/folder")
         return
     
-    one_files = list_one_files(source)
-    
-    if not one_files:
-        click.echo(f"⚠️ No .one files found in: {source}")
-        return
-    
-    # Show folder structure
-    click.echo(f"\n📚 Found {len(one_files)} .one file(s):\n")
-    
-    # Group by parent folder
-    folders = {}
-    for f in sorted(one_files):
-        parent = f.parent.name
-        if parent not in folders:
-            folders[parent] = []
-        folders[parent].append(f.name)
-        
-    for folder, files in folders.items():
-        click.echo(f"  📁 {folder}/")
-        for f in files:
-            click.echo(f"      📄 {f}")
-    click.echo("")
+    if type in ['one', 'all']:
+        one_files = list_one_files(source)
+        if one_files:
+            click.echo(f"\n📚 Found {len(one_files)} .one file(s):\n")
+            for f in sorted(one_files):
+                click.echo(f"  📄 {f.name}")
+                
+    if type in ['pdf', 'all']:
+        pdf_files = list_pdf_files(source)
+        if pdf_files:
+            click.echo(f"\n📄 Found {len(pdf_files)} PDF file(s):\n")
+            for f in sorted(pdf_files):
+                click.echo(f"  📑 {f.name}")
 
 @main.command('export')
-@click.option('--file', '-f', 'file_name', help='Export specific file by name')
+@click.option('--one', '-o', 'export_one', is_flag=True, help='Export .one files')
+@click.option('--pdf', '-p', 'export_pdf', is_flag=True, help='Export PDF files')
 @click.option('--all', '-a', 'export_all', is_flag=True, help='Export all files')
-@click.option('--output', '-o', 'output_dir', help='Output directory')
-@click.option('--structure/--no-structure', default=True, help='Preserve folder structure')
-def export(file_name, export_all, output_dir, structure):
-    """Export .one files to Markdown."""
+@click.option('--file', '-f', 'file_name', help='Export specific file by name')
+@click.option('--output', '-d', 'output_dir', help='Output directory')
+def export(export_one, export_pdf, export_all, file_name, output_dir):
+    """Export files to Markdown."""
     source = config.get_source_folder()
     
     if not source:
         click.echo("❌ Source folder not set. Run:")
-        click.echo("   onenote2md config set-source /path/to/onenote/backup")
+        click.echo("   onenote2md config set-source /path/to/folder")
         return
     
     # Determine output directory
     out_dir = output_dir if output_dir else config.get_output_dir()
+    os.makedirs(out_dir, exist_ok=True)
     
-    if export_all:
-        # Batch export all files
-        results = batch_export(source, out_dir, preserve_structure=structure)
-        
-        # Show summary
-        successful = sum(1 for r in results if r.success)
-        failed = len(results) - successful
-        
-        if failed > 0:
-            click.echo(f"\n⚠️ {failed} file(s) failed:")
-            for r in results:
-                if not r.success:
-                    click.echo(f"  - {r.file.name}: {r.error}")
-    else:
-        # Single file export
+    exported_count = 0
+    
+    # Export .one files
+    if export_one or export_all:
         one_files = list_one_files(source)
-        
-        if not one_files:
-            click.echo("⚠️ No .one files found")
-            return
-        
         if file_name:
             one_files = [f for f in one_files if file_name.lower() in f.name.lower()]
-            if not one_files:
-                click.echo(f"⚠️ No file matching '{file_name}' found")
-                return
-        else:
-            click.echo("Use --file <name> to specify a file, or --all for all files")
-            click.echo("\nAvailable files:")
-            for f in sorted(one_files):
-                click.echo(f"  📄 {f.name}")
-            return
-        
-        click.echo(f"\n📥 Exporting {len(one_files)} file(s)...\n")
-        
-        for f in one_files:
-            click.echo(f"  Processing: {f.name}...")
             
-            try:
-                notebook = parse_one_file(str(f))
-                if notebook:
-                    output_path = convert_to_markdown(notebook, out_dir)
-                    click.echo(f"    ✅ Saved to: {output_path}")
-                else:
-                    click.echo(f"    ⚠️ Could not parse file")
-            except Exception as e:
-                click.echo(f"    ❌ Error: {e}")
-                
-        click.echo(f"\n📂 Output: {out_dir}")
+        if one_files:
+            click.echo(f"\n📥 Exporting {len(one_files)} .one file(s)...\n")
+            for f in one_files:
+                try:
+                    notebook = parse_one_file(str(f))
+                    if notebook:
+                        convert_to_markdown(notebook, out_dir)
+                        click.echo(f"  ✅ {f.name}")
+                        exported_count += 1
+                except Exception as e:
+                    click.echo(f"  ❌ {f.name}: {e}")
+    
+    # Export PDFs
+    if export_pdf or export_all:
+        pdf_files = list_pdf_files(source)
+        if file_name:
+            pdf_files = [f for f in pdf_files if file_name.lower() in f.name.lower()]
+            
+        if pdf_files:
+            click.echo(f"\n📥 Exporting {len(pdf_files)} PDF file(s)...\n")
+            for f in pdf_files:
+                try:
+                    pdf_to_markdown(str(f), out_dir)
+                    click.echo(f"  ✅ {f.name}")
+                    exported_count += 1
+                except Exception as e:
+                    click.echo(f"  ❌ {f.name}: {e}")
+    
+    if exported_count > 0:
+        click.echo(f"\n✅ Exported {exported_count} file(s)")
+        click.echo(f"📂 Output: {out_dir}")
+    else:
+        click.echo("⚠️ No files exported")
 
 @main.command('gui')
 def launch_gui():
