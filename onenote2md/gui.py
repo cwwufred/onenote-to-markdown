@@ -134,10 +134,12 @@ class OneNote2MDApp(ctk.CTk):
     def convert_one_to_pdf(self, one_file, output_dir):
         pdf_path = os.path.join(output_dir, Path(one_file).stem + ".pdf")
         try:
+            one_escaped = one_file.replace("\\", "\\\\")
+            pdf_escaped = pdf_path.replace("\\", "\\\\")
             ps = f'''
 $one = New-Object -ComObject OneNote.Application
-$one.OpenHierarchy("{one_file.replace("\\", "\\\\")}", $false)
-$one.Publish("{one_file.replace("\\", "\\\\")}", "{pdf_path.replace("\\", "\\\\")}", 2)
+$one.OpenHierarchy("{one_escaped}", $false)
+$one.Publish("{one_escaped}", "{pdf_escaped}", 2)
 '''
             subprocess.run(["powershell", "-Command", ps], capture_output=True, timeout=60)
             return pdf_path if os.path.exists(pdf_path) else None
