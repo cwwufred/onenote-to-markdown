@@ -158,63 +158,57 @@ class OneNote2MDApp(ctk.CTk):
         log(f"convert_one_to_pdf called with: {one_file}")
         pdf_path = os.path.join(output_dir, Path(one_file).stem + ".pdf")
         log(f"Target PDF path: {pdf_path}")
-        try:
-            one_abs = os.path.abspath(one_file)
-            pdf_abs = os.path.abspath(pdf_path)
-            log(f"Absolute paths: {one_abs} -> {pdf_abs}")
-            
-            # Method 1: Direct publish from file
-            log(f"Trying direct publish...")
-            ps = f'''
+        
+        # Method 1: Try OneNote via COM with proper error handling
+        one_abs = os.path.abspath(one_file)
+        pdf_abs = os.path.abspath(pdf_path)
+        
+        # First, try opening OneNote and the file programmatically
+        log("Method 1: Starting OneNote and opening file...")
+        ps1 = f'''
 $one = New-Object -ComObject OneNote.Application
-$one.OpenHierarchy("{one_abs}", $null, [ref]$null)
-Start-Sleep -Seconds 1
-$one.Publish("{one_abs}", "{pdf_abs}", 2)  # pfExportFormat=2 means PDF
+$one.Windows.CurrentWindow.NavigateTo("{one_abs}")
+Start-Sleep -Seconds 2
 '''
-            result = subprocess.run(["powershell", "-Command", ps], capture_output=True, text=True, timeout=90)
-            log(f"Method 1 stdout: {result.stdout}")
-            log(f"Method 1 stderr: {result.stderr}")
-            
-            if os.path.exists(pdf_path):
-                log(f"SUCCESS: PDF created")
-                return pdf_path
-            
-            # Method 2: Get notebook XML and convert via print
-            log(f"Trying XML export method...")
-            ps2 = f'''
-$one = New-Object -ComObject OneNote.Application
-$one.OpenHierarchy("{one_abs}", $false)
-Start-Sleep -Seconds 1
-# Get page content as XML
-$xml = $one.GetPageContent($one.GetHierarchy($one_abs, 1))  # 1 = hsPage
-$xml | Out-File -FilePath "{output_dir}\\debug.xml" -Encoding UTF8
-Write-Host "XML exported"
+        result1 = subprocess.run(["powershell", "-Command", ps1], capture_output=True, text=True, timeout=30)
+        log(f"Method 1 result: {result1.stderr}")
+        
+        # Method 2: Try using Shell to print
+        log("Method 2: Using Shell print command...")
+        ps2 = f'''
+$shell = New-Object -ComObject Shell.Application
+$folder = $shell.NameSpace((Split-Path "{one_abs}"))
+$item = $folder.ParseName((Split-Path "{one_abs}" -Leaf))
+$item.InvokeVerb("Print")
 '''
-            result2 = subprocess.run(["powershell", "-Command", ps2], capture_output=True, text=True, timeout=90)
-            log(f"Method 2 stderr: {result2.stderr}")
-            
-            # Method 3: Try different publish format (XPS first, then convert)
-            log(f"Trying XPS then convert...")
-            xps_path = os.path.join(output_dir, Path(one_file).stem + ".xps")
-            ps3 = f'''
-$one = New-Object -ComObject OneNote.Application
-$one.OpenHierarchy("{one_abs}", $false)
-Start-Sleep -Seconds 1
-$one.Publish("{one_abs}", "{xps_path}", 1)  # 1 = pfXPS
+        result2 = subprocess.run(["powershell", "-Command", ps2], capture_output=True, text=True, timeout=30)
+        log(f"Method 2 result: {result2.stderr}")
+        
+        # Method 3: Direct file path that OneNote can open
+        # OneNote requires the file to be accessible - try local copy first
+        log("Method 3: Try with Windows API...")
+        ps3 = f'''
+[System.Runtime.InteropServices.Marshal]::GetActiveObject("OneNote.Application") | ForEach-Object {{
+    $_.Windows.CurrentWindow.NavigateTo("{one_abs}")
+}}
 '''
-            result3 = subprocess.run(["powershell", "-Command", ps3], capture_output=True, text=True, timeout=90)
-            log(f"Method 3 stderr: {result3.stderr}")
-            
-            if os.path.exists(xps_path):
-                log(f"XPS created, converting to PDF...")
-                # XPS to PDF conversion would go here
-                return xps_path.replace(".xps", ".pdf")
-            
-            log(f"FAILURE: All methods failed")
-            return None
-        except Exception as e:
-            log(f"ERROR in convert_one_to_pdf: {e}")
-            return None
+        result3 = subprocess.run(["powershell", "-Command", ps3], capture_output=True, text=True, timeout=30)
+        log(f"Method 3 result: {result3.stderr}")
+        
+        # Method 4: Use OneNote's built-in converter via command line
+        log("Method 4: Check if OneNote is installed...")
+        ps4 = '''Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Office\\*\\OneNote" -ErrorAction SilentlyContinue | Select-Object -First 1'''
+        result4 = subprocess.run(["powershell", "-Command", ps4], capture_output=True, text=True, timeout=15)
+        log(f"OneNote installation: {result4.stdout}")
+        
+        # Method 5: Use NirCmd or similar for print-to-PDF
+        log("Method 5: Check for print drivers...")
+        ps5 = '''Get-Printer | Where-Object {$_.Name -like "*PDF*"}'''
+        result5 = subprocess.run(["powershell", "-Command", ps5], capture_output=True, text=True, timeout=15)
+        log(f"PDF printers: {result5.stdout}")
+        
+        log(f"All OneNote COM methods failed. Returning None to use fallback.")
+        return None
 
     def convert_pdf(self, pdf_path, output_dir):
         log(f"convert_pdf called with: {pdf_path}")
