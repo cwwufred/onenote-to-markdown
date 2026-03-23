@@ -23,11 +23,13 @@ jobs:
           pip install pyinstaller
 
       - name: Build
-        run: |
-          pyinstaller --onefile --console --log-level=DEBUG onenote2md/gui.py 2>&1
+        run: pyinstaller --onefile --console onenote2md/gui.py
+
+      - name: Create ZIP
+        run: Compress-Archive -Path dist/onenote2md.exe -DestinationPath onenote2md-windows.zip -Force
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: onenote2md
-          path: dist/onenote2md.exe
+          name: onenote2md-windows
+          path: onenote2md-windows.zip
